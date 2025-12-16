@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <style>
+    .item {
+      width: 150px;
+      height: 150px;
+      border: 1px solid orange;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div data-shuffleable class="item">1</div>
+    <div data-shuffleable class="item">2</div>
+    <div data-shuffleable class="item">3</div>
+    <div data-shuffleable class="item">4</div>
+  </div>
+
+  <script>
+    // Запрашиваем разрешение на доступ к акселерометру
+    async function requestMotionPermission() {
+      try {
+        const permission = await DeviceMotionEvent.requestPermission?.();
+        if (permission === 'granted') {
+          window.addEventListener('devicemotion', handleMotion);
+        }
+      } catch (error) {
+        console.error('Ошибка разрешения:', error);
+      }
+    }
+
+    let lastShakeTime = 0;
+    const SHAKE_THRESHOLD = 15; // Порог чувствительности
+    const SHAKE_COOLDOWN = 500; // мс между обнаружениями
+
+    function handleMotion(event) {
+      const acceleration = event.accelerationIncludingGravity;
+      const x = acceleration.x || 0;
+      const y = acceleration.y || 0;
+      const z = acceleration.z || 0;
+
+      // Вычисляем величину ускорения
+      const magnitude = Math.sqrt(x * x + y * y + z * z);
+
+      // Если встряска достаточно сильная и не в cooldown
+      if (magnitude > SHAKE_THRESHOLD && Date.now() - lastShakeTime > SHAKE_COOLDOWN) {
+        lastShakeTime = Date.now();
+        shuffleElements();
+      }
+    }
+
+    function shuffleElements() {
+      const elements = document.querySelectorAll('[data-shuffleable]');
+      const parent = elements[0]?.parentElement;
+      
+      if (!parent) return;
+
+      // Перемешиваем элементы
+      const shuffled = Array.from(elements).sort(() => Math.random() - 0.5);
+      
+      shuffled.forEach(el => parent.appendChild(el));
+      console.log('Элементы перемешаны!');
+    }
+
+    // Стартуем при клике (нужно для iOS)
+    document.addEventListener('click', requestMotionPermission, { once: true });
+
+  </script>
+</body>
+</html>
