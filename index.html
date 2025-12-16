@@ -3,17 +3,109 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Document</title>
+  <title>Shake Test</title>
   <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    .status {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: white;
+      border: 2px solid #333;
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 1000;
+      max-width: 300px;
+    }
+
+    .status.granted {
+      border-color: green;
+      background: #e8f5e9;
+    }
+
+    .status.denied {
+      border-color: red;
+      background: #ffebee;
+    }
+
+    .status.waiting {
+      border-color: orange;
+      background: #fff3e0;
+    }
+
     .item {
       width: 150px;
       height: 150px;
-      border: 1px solid orange;
+      border: 3px solid orange;
       margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      background: white;
+      border-radius: 8px;
+      transition: all 0.3s ease;
+    }
+
+    .item:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    .container {
+      margin-top: 60px;
+    }
+
+    .debug-info {
+      background: #f0f0f0;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      margin-bottom: 20px;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+
+    .magnitude-bar {
+      height: 20px;
+      background: #ddd;
+      border-radius: 4px;
+      margin: 10px 0;
+      overflow: hidden;
+    }
+
+    .magnitude-fill {
+      height: 100%;
+      background: linear-gradient(to right, #4CAF50, #FFC107, #F44336);
+      width: 0%;
+      transition: width 0.1s;
     }
   </style>
 </head>
 <body>
+  <div class="status waiting" id="status">
+    <strong>📱 Статус:</strong> Кликните чтобы включить акселерометр
+    <div id="statusText"></div>
+  </div>
+
+  <div class="debug-info">
+    <div><strong>Последнее ускорение:</strong> <span id="lastAccel">-</span></div>
+    <div><strong>Встрясок:</strong> <span id="shakeCount">0</span></div>
+    <div><strong>Платформа:</strong> <span id="platform">-</span></div>
+    <div><strong>Поддержка DeviceMotion:</strong> <span id="support">-</span></div>
+    <div style="margin-top: 10px;">Порог встряски: 15</div>
+    <div style="margin-top: 5px;">Величина ускорения:</div>
+    <div class="magnitude-bar">
+      <div class="magnitude-fill" id="magnitudeFill"></div>
+    </div>
+  </div>
+
   <div class="container">
     <div data-shuffleable class="item">1</div>
     <div data-shuffleable class="item">2</div>
@@ -22,54 +114,127 @@
   </div>
 
   <script>
-    // Запрашиваем разрешение на доступ к акселерометру
+    const statusEl = document.getElementById('status');
+    const statusText = document.getElementById('statusText');
+    const lastAccelEl = document.getElementById('lastAccel');
+    const shakeCountEl = document.getElementById('shakeCount');
+    const platformEl = document.getElementById('platform');
+    const supportEl = document.getElementById('support');
+    const magnitudeFill = document.getElementById('magnitudeFill');
+
+    let shakeCount = 0;
+    let lastShakeTime = 0;
+    const SHAKE_THRESHOLD = 15;
+    const SHAKE_COOLDOWN = 500;
+
+    // Диагностика платформы
+    function setupDiagnostics() {
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const hasPermissionAPI = typeof DeviceMotionEvent !== 'undefined' && 
+                               DeviceMotionEvent.requestPermission !== undefined;
+
+      platformEl.textContent = isIOS ? 'iOS' : 'Android/Other';
+      supportEl.textContent = hasPermissionAPI ? 'iOS-style (requestPermission)' : 'Android-style (автоматически)';
+
+      return { isIOS, hasPermissionAPI };
+    }
+
+    const { isIOS, hasPermissionAPI } = setupDiagnostics();
+
     async function requestMotionPermission() {
       try {
-        const permission = await DeviceMotionEvent.requestPermission?.();
-        if (permission === 'granted') {
+        updateStatus('Запрашиваю разрешение...', 'waiting');
+
+        if (hasPermissionAPI) {
+          // iOS путь
+          const permission = await DeviceMotionEvent.requestPermission();
+          console.log('Разрешение:', permission);
+
+          if (permission === 'granted') {
+            window.addEventListener('devicemotion', handleMotion);
+            updateStatus('✅ Разрешение получено! Трясите телефон', 'granted');
+            statusText.textContent = 'Акселерометр активен';
+          } else if (permission === 'denied') {
+            updateStatus('❌ Разрешение отклонено', 'denied');
+            statusText.textContent = 'Включите доступ в настройках';
+          }
+        } else {
+          // Android путь - добавляем слушатель напрямую
           window.addEventListener('devicemotion', handleMotion);
+          updateStatus('✅ Слушатель установлен! Трясите телефон', 'granted');
+          statusText.textContent = 'Акселерометр активен (Android)';
         }
       } catch (error) {
         console.error('Ошибка разрешения:', error);
+        updateStatus('❌ Ошибка: ' + error.message, 'denied');
+        statusText.textContent = error.message;
       }
     }
 
-    let lastShakeTime = 0;
-    const SHAKE_THRESHOLD = 15; // Порог чувствительности
-    const SHAKE_COOLDOWN = 500; // мс между обнаружениями
+    function updateStatus(message, className) {
+      statusEl.textContent = message;
+      statusEl.className = 'status ' + className;
+      statusText.textContent = '';
+    }
 
     function handleMotion(event) {
       const acceleration = event.accelerationIncludingGravity;
+      if (!acceleration) {
+        console.warn('Нет данных ускорения');
+        return;
+      }
+
       const x = acceleration.x || 0;
       const y = acceleration.y || 0;
       const z = acceleration.z || 0;
 
-      // Вычисляем величину ускорения
       const magnitude = Math.sqrt(x * x + y * y + z * z);
+      
+      // Обновляем визуализацию
+      lastAccelEl.textContent = magnitude.toFixed(2);
+      const barWidth = Math.min((magnitude / 50) * 100, 100);
+      magnitudeFill.style.width = barWidth + '%';
 
-      // Если встряска достаточно сильная и не в cooldown
+      // Обнаружение встряски
       if (magnitude > SHAKE_THRESHOLD && Date.now() - lastShakeTime > SHAKE_COOLDOWN) {
         lastShakeTime = Date.now();
+        shakeCount++;
+        shakeCountEl.textContent = shakeCount;
         shuffleElements();
+        console.log(`🎉 Встряска #${shakeCount}! Величина: ${magnitude.toFixed(2)}`);
       }
     }
 
     function shuffleElements() {
       const elements = document.querySelectorAll('[data-shuffleable]');
       const parent = elements[0]?.parentElement;
-      
+
       if (!parent) return;
 
-      // Перемешиваем элементы
-      const shuffled = Array.from(elements).sort(() => Math.random() - 0.5);
+      // Анимация
+      parent.style.opacity = '0.5';
       
-      shuffled.forEach(el => parent.appendChild(el));
-      console.log('Элементы перемешаны!');
+      setTimeout(() => {
+        const shuffled = Array.from(elements).sort(() => Math.random() - 0.5);
+        shuffled.forEach(el => parent.appendChild(el));
+        parent.style.opacity = '1';
+        console.log('Элементы перемешаны!');
+      }, 100);
     }
 
-    // Стартуем при клике (нужно для iOS)
+    // Активируем при первом клике
     document.addEventListener('click', requestMotionPermission, { once: true });
+    
+    // Или при нажатии на Enter
+    document.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        requestMotionPermission();
+      }
+    });
 
+    // Логируем при загрузке
+    console.log('🔧 Страница загружена. iOS:', isIOS, 'Имеет requestPermission:', hasPermissionAPI);
+    console.log('Кликните на странице или нажмите Enter для включения акселерометра');
   </script>
 </body>
 </html>
